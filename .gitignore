@@ -1,0 +1,55 @@
+profile
+*.moved-aside
+DerivedData
+.idea/
+
+# xcode noise
+build/*
+*.perspective
+*.perspectivev3
+*.pbxuser
+*.mode1
+*.mode2v3
+*.mode1v3
+xcuserdata
+Snapshots
+test-reports/
+*.xccheckout
+*.xcconfig
+*.xcscmblueprint
+
+# osx noise
+.DS_Store
+Thumbs.db
+
+# Carthage
+.carthage_cache.yml
+Carthage/
+
+Frameworks/*
+Skateboard3DViewer
+
+# Developer specific configuration
+.swiftlint-report.json
+.parse-dashboard-config.json
+Info-Debug.plist
+
+# Allow
+!/Syrmo/UIComponents/Profile/
+!/Frameworks/Fabric.framework/
+!/Frameworks/Crashlytics.framework/
+
+# fastlane
+fastlane/.evn.default
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots
+fastlane/README.md
+fastlane/test_output
+*.cer
+*.certSigningRequest
+*.p12
+
+# Credentials
+itunes-credentials.yml
+
