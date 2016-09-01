@@ -8,217 +8,122 @@
 
 import UIKit
 import ReactiveCocoa
-import enum Result.NoError
+import Result
 
-public enum State {
+
+public protocol CommandExecutor {
     
-    case Idle(tracker: TrackerMetadata)
-    case CheckingForUpdate(tracker: TrackerMetadata)
-    case CheckForUpdateError(tracker: TrackerMetadata, error: NSError)
-    case PendingDownload(firmware: FirmwareMetadata)
-    case Downloading(firmware: FirmwareMetadata, progress: Progress)
-    case DownloadError(firmware: FirmwareMetadata, error: NSError)
-    case PendingInstall(firmware: FirmwareArchive)
-    case Installing(firmware: FirmwareArchive, progress: Progress)
-    case InstallError(firmware: FirmwareArchive, error: NSError)
-    case UpToDate(firmwareVersion: SemanticVersion)
+    associatedtype EventType
+    associatedtype CommandType
+    
+    func execute(command: CommandType, handler: (EventType) -> ())
     
 }
 
-public enum Event {
+public final class AnyCommandExecutor<EventType, CommandType>: CommandExecutor {
     
-    case CheckForUpdate
-    case UpdateUnavailable
-    case FailedToCheckForUpdate(error: NSError)
-    case UpdateAvailable(firmware: FirmwareMetadata)
-    case Download
-    case FailedToDownload(error: NSError)
-    case ProgressUpdate(progress: Progress)
-    case DownloadCompleted(archive: NSURL)
-    case Install
-    case FailedToInstall(error: NSError)
-    case TransferCompleted
+    private let _execute: (CommandType, (EventType) -> ()) -> ()
     
-}
-
-public enum Command {
+    init<CommandExecutorType: CommandExecutor
+        where   CommandExecutorType.EventType == EventType,
+                CommandExecutorType.CommandType == CommandType>(commandExecutor: CommandExecutorType) {
+        _execute = commandExecutor.execute
+    }
     
-    case CheckForUpdate(tracker: TrackerMetadata)
-    case Download(firmware: FirmwareMetadata)
-    case Install(firmware: FirmwareArchive)
+    public func execute(command: CommandType, handler: (EventType) -> ()) {
+        _execute(command, handler)
+    }
     
 }
 
-protocol CommandExecutor {
+public class ReactiveCommandExecutor<EventType, CommandType>: CommandExecutor {
     
-    func execute(command: Command) -> SignalProducer<Event, NoError>
+    typealias EventProducer = SignalProducer<EventType, NoError>
+    
+    final public func execute(command: CommandType, handler: (EventType) -> ()) {
+        execute(command).startWithNext(handler)
+    }
+    
+    func execute(command: CommandType) -> EventProducer {
+        return EventProducer.empty
+    }
+
+}
+
+public protocol Component {
+    
+    associatedtype StateType
+    associatedtype EventType
+    associatedtype CommandType
+    
+    var state: AnyProperty<StateType> { get }
+    
+    func handle(event: EventType) -> (StateType, CommandType?)?
     
 }
 
-protocol Component {
+public protocol Dispatcher {
     
-    associatedtype State
-    associatedtype Event
-    associatedtype Command
+    associatedtype EventType
     
-    var state: AnyProperty<State> { get }
-    
-    func handler(event: Event) -> (State, Command?)?
+    func dispatch(event: EventType)
     
 }
 
-protocol Dispatcher {
+public class BaseComponent<StateType, EventType, CommandType, CommandExecutorType: CommandExecutor
+    where   CommandExecutorType.EventType == EventType,
+            CommandExecutorType.CommandType == CommandType>: Component, Dispatcher {
     
-    associatedtype Event
+    public let state: AnyProperty<StateType>
     
-    func dispatch(event: Event)
+    private let _state: MutableProperty<StateType>
+    private let _commandExecutor: CommandExecutorType
     
-}
-
-public final class FirmwareUpdateComponent {
-    
-    public let state: AnyProperty<State>
-    
-    private let _state: MutableProperty<State>
-    private let _executor: CommandExecutor
-    
-    init(tracker: TrackerMetadata, executor: CommandExecutor) {
-        _executor = executor
-        _state = MutableProperty(.Idle(tracker: tracker))
+    init(initialState: StateType, commandExecutor: CommandExecutorType) {
+        _commandExecutor = commandExecutor
+        _state = MutableProperty(initialState)
         state = AnyProperty(_state)
     }
     
-    public func dispatch(event: Event) {
+    public final func dispatch(event: EventType) {
         if let (nextState, maybeCommand) = handle(event) {
             _state.value = nextState
             if let command = maybeCommand {
-                _executor.execute(command).startWithNext { self.dispatch($0) }
+                _commandExecutor.execute(command, handler: dispatch)
             }
         }
     }
     
-    public func handle(event: Event) -> (State, Command?)? {
-        switch (state.value, event) {
-        
-            
-        case (.Idle(let tracker), .CheckForUpdate):
-            return (.CheckingForUpdate(tracker: tracker), .CheckForUpdate(tracker: tracker))
-            
-        case (.CheckingForUpdate(let tracker), .FailedToCheckForUpdate(let error)):
-            return (.CheckForUpdateError(tracker: tracker, error: error), .None)
-            
-        case (.CheckingForUpdate(let tracker), .UpdateUnavailable):
-            return (.UpToDate(firmwareVersion: tracker.firmwareVersion), .None)
-            
-        case (.CheckingForUpdate(_), .UpdateAvailable(let firmware)):
-            return (.PendingDownload(firmware: firmware), .None)
-            
-        case (.PendingDownload(let firmware), .Download):
-            let progress = Progress(partial: 0, total: firmware.size)
-            return (.Downloading(firmware: firmware, progress: progress), .Download(firmware: firmware))
-            
-        case (.Downloading(let firmware, _), .ProgressUpdate(let progress)):
-            return (.Downloading(firmware: firmware, progress: progress), .None)
-            
-        case (.Downloading(let firmware, _), .FailedToDownload(let error)):
-            return (.DownloadError(firmware: firmware, error: error), .None)
-            
-        case (.Downloading(let metadata, _), .DownloadCompleted(let archive)):
-            let firmware = FirmwareArchive(metadata: metadata, archive: archive, downloadedAt: NSDate())
-            return (.PendingInstall(firmware: firmware), .None)
-            
-        case (.PendingInstall(let firmware), .Install):
-            let progress = Progress(partial: 0, total: firmware.metadata.size)
-            return (.Installing(firmware: firmware, progress: progress), .Install(firmware: firmware))
- 
-        case (.Installing(let firmware, _), .ProgressUpdate(let progress)):
-            return (.Installing(firmware: firmware, progress: progress), .None)
-            
-        case (.Installing(let firmware, _), .FailedToInstall(let error)):
-            return (.InstallError(firmware: firmware, error: error), .None)
-            
-        case (.Installing(let firmware, _), .TransferCompleted):
-            return (.UpToDate(firmwareVersion: firmware.metadata.version), .None)
-            
-            
-        default:
-            return .None
-            
-        }
+    public func handle(event: EventType) -> (StateType, CommandType?)? {
+        return .None
     }
     
 }
 
-final class DefaultCommandExecutor: CommandExecutor {
+public final class AnyComponent<StateType, EventType, CommandType, CommandExecutorType: CommandExecutor
+    where   CommandExecutorType.EventType == EventType,
+            CommandExecutorType.CommandType == CommandType>: BaseComponent<StateType, EventType, CommandType, CommandExecutorType> {
     
-    private let _firmwareService: FirmwareService
-    private let _trackerService: TrackerService
+    private let _handler: (EventType) -> (StateType, CommandType?)?
     
-    init(firmwareService: FirmwareService, trackerService: TrackerService) {
-        _firmwareService = firmwareService
-        _trackerService = trackerService
+//    init<ComponentType: Component
+//        where   ComponentType.StateType == StateType,
+//                ComponentType.EventType == EventType,
+//                ComponentType.CommandType == CommandType>(component: ComponentType) {
+//        self.init(initialState: component.state.value, commandExecutor: component._commandExecutor)
+//    }
+    
+    init(initialState: StateType, commandExecutor: CommandExecutorType, handler: (EventType) -> (StateType, CommandType?)?) {
+        _handler = handler
+        super.init(initialState: initialState, commandExecutor: commandExecutor)
     }
     
-    func execute(command: Command) -> SignalProducer<Event, NoError> {
-        switch command {
-            
-        case .CheckForUpdate(let tracker):
-            return checkForUpdate(tracker)
-            
-        case .Download(let firmware):
-            return download(firmware)
-        
-        case .Install(let firmware):
-            return install(firmware)
-            
-        }
+    override public func handle(event: EventType) -> (StateType, CommandType?)? {
+        return _handler(event)
     }
     
 }
 
-private extension DefaultCommandExecutor {
-    
-    private func checkForUpdate(tracker: TrackerMetadata) -> SignalProducer<Event, NoError> {
-        // TODO check in the local file system if there are archive already
-        // downloaded
-        return _firmwareService.checkForUpdate(tracker)
-            .map {
-                if let firmware = $0 {
-                    return Event.UpdateAvailable(firmware: firmware)
-                } else {
-                    return Event.UpdateUnavailable
-                }
-            }
-            .flatMapError { SignalProducer(value: .FailedToCheckForUpdate(error: $0)) }
-    }
-    
-    private func download(firmwareMetadata: FirmwareMetadata) -> SignalProducer<Event, NoError> {
-        return _firmwareService.download(firmwareMetadata)
-            .map {
-                switch $0 {
-                case .Chunck(let progress):
-                    return Event.ProgressUpdate(progress: progress)
-                case .Completed(let archive):
-                    return Event.DownloadCompleted(archive: archive)
-                }
-            }
-            .flatMapError { SignalProducer(value: .FailedToDownload(error: $0)) }
-    }
-    
-    private func install(firmware: FirmwareArchive) -> SignalProducer<Event, NoError> {
-        return _trackerService.install(firmware)
-            .map {
-                switch $0 {
-                case .Chunck(let progress):
-                    return Event.ProgressUpdate(progress: progress)
-                case .Completed(_):
-                    return Event.TransferCompleted
-                }
-            }
-            .flatMapError { SignalProducer(value: .FailedToInstall(error: $0)) }
-    }
-    
-}
 
 // Views
 
@@ -263,7 +168,7 @@ extension LoadableView {
     
 }
 
-final class ReusableViewContainer<ViewType: LoadableView where ViewType: UIView> {
+final class RecyclerView<ViewType: LoadableView where ViewType: UIView> {
     
     private let _configure: (ViewType) -> ()
     private let _viewClass: ViewType.Type
@@ -275,7 +180,7 @@ final class ReusableViewContainer<ViewType: LoadableView where ViewType: UIView>
     
 }
 
-extension ReusableViewContainer: View {
+extension RecyclerView: View {
     
     func renderIn(containerView containerView: UIView) {
         if let genericSubview = containerView.subviews.first, let subview = _viewClass.cast(genericSubview) {
@@ -292,82 +197,39 @@ extension ReusableViewContainer: View {
     
 }
 
-final class ProgressView: UIView, LoadableView {
-    
-    @IBOutlet weak var partialLabel: UILabel!
-    @IBOutlet weak var totalLabel: UILabel!
-    @IBOutlet weak var progressBar: UIProgressView!
-    
-    var unit = ProgressUnit.Bytes
-    
-    var progress = Progress(partial: 0, total: 0) {
-        didSet {
-            if progress.total > 0 {
-                partialLabel.text = format(progress.partial)
-                totalLabel.text = format(progress.total)
-                progressBar.progress = progress.relative
-            }
-        }
-    }
-    
-    init() {
-        super.init(frame: CGRect.zero)
-    }
-    
-    required init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    private func format(value: UInt) -> String {
-        switch unit {
-        case .Bytes:
-            return "\(value) B"
-        case .KiloBytes:
-            return "\(value / 1024) KB"
-        case .MegaBytes:
-            return "\(value / 1024 / 1024) MB"
-        }
-    }
-    
-}
+//
+// TODO
+//
+// Think about how things like alerts should be handled. Probably the best thing
+// would be to have an AlertView which conforms to Alert and make the controller 
+// intercept it and present an alert view controller
+//
+// Things like transitions, push a controller to the navigation stack should be
+// handled by the parent components and the child components should send an 
+// OutputMessage. Is the resposability of the parent to know which controller to present
+// next. Container controller should not have a componenet associated with them. They
+// should only compose component controllers and coordinate transitions. Pretty much
+// like a coordinator.
+//
+public class BaseComponentController<StateType, EventType, DispatcherType: Dispatcher
+    where DispatcherType.EventType == EventType>: UIViewController {
 
-final class IdleView: UIView {
+    public let dispatcher: DispatcherType
     
-    @IBOutlet weak var checkForUpdateButton: UIButton!
+    private let _state: AnyProperty<StateType>
     
-    private let _onTap: () -> ()
-    
-    init(onTap: () -> ()) {
-        _onTap = onTap
-        super.init(frame: CGRect.zero)
-    }
-    
-    required init?(coder aDecoder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    @objc
-    func handleTap() {
-        _onTap()
-    }
-    
-}
-
-final class FirmwareUpdateController: UIViewController {
-    
-    private let _component: FirmwareUpdateComponent
-    
-    init(component: FirmwareUpdateComponent) {
-        _component = component
+    init(state: AnyProperty<StateType>, dispatcher: DispatcherType) {
+        _state = state
+        self.dispatcher = dispatcher
         super.init(nibName: nil, bundle: nil)
     }
     
-    required init?(coder aDecoder: NSCoder) {
+    required public init?(coder aDecoder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    override func viewDidLoad() {
-        _component.state.producer
+    override public func viewDidLoad() {
+        _state.producer
             .map { [unowned self] in self.render($0) }
             .observeOn(UIScheduler())
             .startWithNext { [unowned self] in
@@ -375,108 +237,26 @@ final class FirmwareUpdateController: UIViewController {
             }
     }
     
-    func render(state: State) -> View {
-        switch state {
-            
-        case .Idle(_):
-            return IdleView { self._component.dispatch(.CheckForUpdate) }
-            
-        case .Downloading(_, let progress):
-            return ReusableViewContainer(viewClass: ProgressView.self) {
-                $0.unit = .KiloBytes
-                $0.progress = progress
-            }
-        
-        default:
-            // TODO handle all possible states
-            return UIView()
-            
-        }
+    func render(state: StateType) -> View {
+        return UIView()
     }
     
 }
 
-// Models
+final class ComponentController<StateType, EventType, DispatcherType: Dispatcher
+    where DispatcherType.EventType == EventType>: BaseComponentController<StateType, EventType, DispatcherType> {
 
-public struct TrackerMetadata {
+    typealias Renderer = (DispatcherType, StateType) -> View
     
-    let firmwareVersion: SemanticVersion
-    let modelNumber: UInt
-    let hardwareRevision: HardwareRevision
+    private let _renderer: Renderer
     
-}
-
-public struct SemanticVersion {
+    init(state: AnyProperty<StateType>, dispatcher: DispatcherType, renderer: Renderer) {
+        _renderer = renderer
+        super.init(state: state, dispatcher: dispatcher)
+    }
     
-    let mayor: UInt
-    let minor: UInt
-    let patch: UInt
-    
-}
-
-public struct HardwareRevision {
-    
-    let minor: UInt
-    let patch: UInt
-    
-}
-
-public struct FirmwareMetadata {
-    
-    let version: SemanticVersion
-    let hardwareRevision: HardwareRevision
-    let modelNumber: UInt
-    let bucket: String
-    let key: String
-    let size: UInt
-    
-}
-
-public struct FirmwareArchive {
-    
-    let metadata: FirmwareMetadata
-    let archive: NSURL
-    let downloadedAt: NSDate
-    
-}
-
-public struct Progress {
-
-    let partial: UInt
-    let total: UInt
-    
-    var relative: Float { return Float(partial) / Float(total) }
-    var percentage: Float { return relative * 100.0 }
-    
-}
-
-public enum TransferState<Value> {
-    
-    case Chunck(progress: Progress)
-    case Completed(value: Value)
-    
-}
-
-public enum ProgressUnit {
-    
-    case Bytes
-    case KiloBytes
-    case MegaBytes
-    
-}
-
-// Services
-
-protocol FirmwareService {
-    
-    func checkForUpdate(tracker: TrackerMetadata) -> SignalProducer<FirmwareMetadata?, NSError>
-    
-    func download(firmware: FirmwareMetadata) -> SignalProducer<TransferState<NSURL>, NSError>
-    
-}
-
-protocol TrackerService {
-    
-    func install(firmware: FirmwareArchive) -> SignalProducer<TransferState<Void>, NSError>
+    override func render(state: StateType) -> View {
+        return _renderer(dispatcher, state)
+    }
     
 }
