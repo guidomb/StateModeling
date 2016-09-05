@@ -16,7 +16,9 @@
 		9D1042031D73A3D000013810 /* ReactiveCocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D1042011D73A3D000013810 /* ReactiveCocoa.framework */; };
 		9D1042041D73A3D000013810 /* Result.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D1042021D73A3D000013810 /* Result.framework */; };
 		9D1042061D73A4D700013810 /* State.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D1042051D73A4D700013810 /* State.swift */; };
-		9D7026FB1D77EFB900E943B1 /* FirmwareUpdateComponent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7026FA1D77EFB900E943B1 /* FirmwareUpdateComponent.swift */; };
+		9D7026FB1D77EFB900E943B1 /* Component.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7026FA1D77EFB900E943B1 /* Component.swift */; };
+		9DD650C41D79E31300E318D4 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD650C31D79E31300E318D4 /* Models.swift */; };
+		9DD650C61D79E33C00E318D4 /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DD650C51D79E33C00E318D4 /* Views.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -43,7 +45,9 @@
 		9D1042011D73A3D000013810 /* ReactiveCocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ReactiveCocoa.framework; path = Carthage/Build/iOS/ReactiveCocoa.framework; sourceTree = "<group>"; };
 		9D1042021D73A3D000013810 /* Result.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Result.framework; path = Carthage/Build/iOS/Result.framework; sourceTree = "<group>"; };
 		9D1042051D73A4D700013810 /* State.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = State.swift; sourceTree = "<group>"; };
-		9D7026FA1D77EFB900E943B1 /* FirmwareUpdateComponent.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FirmwareUpdateComponent.swift; sourceTree = "<group>"; };
+		9D7026FA1D77EFB900E943B1 /* Component.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Component.swift; sourceTree = "<group>"; };
+		9DD650C31D79E31300E318D4 /* Models.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		9DD650C51D79E33C00E318D4 /* Views.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +93,7 @@
 		9D1041E01D73A1AF00013810 /* StateModeling */ = {
 			isa = PBXGroup;
 			children = (
+				9DD650C21D79E2CE00E318D4 /* FirmwareUpdate */,
 				9D1041E11D73A1AF00013810 /* AppDelegate.swift */,
 				9D1041E31D73A1AF00013810 /* ViewController.swift */,
 				9D1041E51D73A1AF00013810 /* Main.storyboard */,
@@ -96,7 +101,6 @@
 				9D1041EA1D73A1AF00013810 /* LaunchScreen.storyboard */,
 				9D1041ED1D73A1AF00013810 /* Info.plist */,
 				9D1042051D73A4D700013810 /* State.swift */,
-				9D7026FA1D77EFB900E943B1 /* FirmwareUpdateComponent.swift */,
 			);
 			path = StateModeling;
 			sourceTree = "<group>";
@@ -108,6 +112,16 @@
 				9D1041F81D73A1AF00013810 /* Info.plist */,
 			);
 			path = StateModelingTests;
+			sourceTree = "<group>";
+		};
+		9DD650C21D79E2CE00E318D4 /* FirmwareUpdate */ = {
+			isa = PBXGroup;
+			children = (
+				9D7026FA1D77EFB900E943B1 /* Component.swift */,
+				9DD650C31D79E31300E318D4 /* Models.swift */,
+				9DD650C51D79E33C00E318D4 /* Views.swift */,
+			);
+			name = FirmwareUpdate;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -213,8 +227,10 @@
 			files = (
 				9D1041E41D73A1AF00013810 /* ViewController.swift in Sources */,
 				9D1041E21D73A1AF00013810 /* AppDelegate.swift in Sources */,
+				9DD650C61D79E33C00E318D4 /* Views.swift in Sources */,
 				9D1042061D73A4D700013810 /* State.swift in Sources */,
-				9D7026FB1D77EFB900E943B1 /* FirmwareUpdateComponent.swift in Sources */,
+				9D7026FB1D77EFB900E943B1 /* Component.swift in Sources */,
+				9DD650C41D79E31300E318D4 /* Models.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

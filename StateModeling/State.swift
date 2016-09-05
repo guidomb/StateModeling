@@ -13,113 +13,96 @@ import Result
 
 public protocol CommandExecutor {
     
-    associatedtype EventType
+    associatedtype InputMessageType
     associatedtype CommandType
     
-    func execute(command: CommandType, handler: (EventType) -> ())
+    func execute(command: CommandType, handler: (InputMessageType) -> ())
     
 }
 
-public final class AnyCommandExecutor<EventType, CommandType>: CommandExecutor {
+public final class AnyCommandExecutor<InputMessageType, CommandType>: CommandExecutor {
     
-    private let _execute: (CommandType, (EventType) -> ()) -> ()
+    private let _execute: (CommandType, (InputMessageType) -> ()) -> ()
     
     init<CommandExecutorType: CommandExecutor
-        where   CommandExecutorType.EventType == EventType,
+        where   CommandExecutorType.InputMessageType == InputMessageType,
                 CommandExecutorType.CommandType == CommandType>(commandExecutor: CommandExecutorType) {
         _execute = commandExecutor.execute
     }
     
-    public func execute(command: CommandType, handler: (EventType) -> ()) {
+    public func execute(command: CommandType, handler: (InputMessageType) -> ()) {
         _execute(command, handler)
     }
     
 }
 
-public class ReactiveCommandExecutor<EventType, CommandType>: CommandExecutor {
+public final class VoidCommandExecutor<InputMessageType>: CommandExecutor {
     
-    typealias EventProducer = SignalProducer<EventType, NoError>
+    public func execute(command: Void, handler: (InputMessageType) -> ()) {
+        
+    }
     
-    final public func execute(command: CommandType, handler: (EventType) -> ()) {
+}
+
+public class ReactiveCommandExecutor<InputMessageType, CommandType>: CommandExecutor {
+    
+    typealias MessageProducer = SignalProducer<InputMessageType, NoError>
+    
+    final public func execute(command: CommandType, handler: (InputMessageType) -> ()) {
         execute(command).startWithNext(handler)
     }
     
-    func execute(command: CommandType) -> EventProducer {
-        return EventProducer.empty
+    func execute(command: CommandType) -> MessageProducer {
+        return MessageProducer.empty
     }
 
-}
-
-public protocol Component {
-    
-    associatedtype StateType
-    associatedtype EventType
-    associatedtype CommandType
-    
-    var state: AnyProperty<StateType> { get }
-    
-    func handle(event: EventType) -> (StateType, CommandType?)?
-    
 }
 
 public protocol Dispatcher {
     
-    associatedtype EventType
+    associatedtype InputMessageType
     
-    func dispatch(event: EventType)
+    func dispatch(message: InputMessageType)
     
 }
 
-public class BaseComponent<StateType, EventType, CommandType, CommandExecutorType: CommandExecutor
-    where   CommandExecutorType.EventType == EventType,
-            CommandExecutorType.CommandType == CommandType>: Component, Dispatcher {
+public final class Component<StateType, InputMessageType, OutputMessageType, CommandType, CommandExecutorType: CommandExecutor
+    where   CommandExecutorType.InputMessageType == InputMessageType,
+            CommandExecutorType.CommandType == CommandType>: Dispatcher {
+
+    public typealias Behavior = (StateType, InputMessageType) -> (StateType, CommandType?, OutputMessageType?)?
     
     public let state: AnyProperty<StateType>
+    public let messages: Signal<OutputMessageType, NoError>
     
     private let _state: MutableProperty<StateType>
     private let _commandExecutor: CommandExecutorType
+    private let _messagesObserver: Observer<OutputMessageType, NoError>
+    private let _behavior: Behavior
     
-    init(initialState: StateType, commandExecutor: CommandExecutorType) {
-        _commandExecutor = commandExecutor
+    init(initialState: StateType, commandExecutor: CommandExecutorType, behavior: Behavior) {
         _state = MutableProperty(initialState)
         state = AnyProperty(_state)
+        _commandExecutor = commandExecutor
+        (messages, _messagesObserver) = Signal<OutputMessageType, NoError>.pipe()
+        _behavior = behavior
     }
     
-    public final func dispatch(event: EventType) {
-        if let (nextState, maybeCommand) = handle(event) {
+    deinit {
+        _messagesObserver.sendCompleted()
+    }
+    
+    public func dispatch(message: InputMessageType) {
+        if let (nextState, maybeCommand, maybeMessage) = _behavior(state.value, message) {
             _state.value = nextState
             if let command = maybeCommand {
-                _commandExecutor.execute(command, handler: dispatch)
+                _commandExecutor.execute(command, handler: self.dispatch)
+            }
+            if let message = maybeMessage {
+                _messagesObserver.sendNext(message)
             }
         }
-    }
-    
-    public func handle(event: EventType) -> (StateType, CommandType?)? {
-        return .None
-    }
-    
-}
 
-public final class AnyComponent<StateType, EventType, CommandType, CommandExecutorType: CommandExecutor
-    where   CommandExecutorType.EventType == EventType,
-            CommandExecutorType.CommandType == CommandType>: BaseComponent<StateType, EventType, CommandType, CommandExecutorType> {
-    
-    private let _handler: (EventType) -> (StateType, CommandType?)?
-    
-//    init<ComponentType: Component
-//        where   ComponentType.StateType == StateType,
-//                ComponentType.EventType == EventType,
-//                ComponentType.CommandType == CommandType>(component: ComponentType) {
-//        self.init(initialState: component.state.value, commandExecutor: component._commandExecutor)
-//    }
-    
-    init(initialState: StateType, commandExecutor: CommandExecutorType, handler: (EventType) -> (StateType, CommandType?)?) {
-        _handler = handler
-        super.init(initialState: initialState, commandExecutor: commandExecutor)
-    }
-    
-    override public func handle(event: EventType) -> (StateType, CommandType?)? {
-        return _handler(event)
     }
     
 }
@@ -127,27 +110,30 @@ public final class AnyComponent<StateType, EventType, CommandType, CommandExecut
 
 // Views
 
-protocol View {
+protocol View { }
+
+protocol Renderable {
     
     func renderIn(containerView containerView: UIView)
     
 }
 
-extension UIView: View {
+protocol Presentable {
+    
+    func presentIn(container containerController: UIViewController)
+    
+}
+
+extension UIView: View, Renderable {
     
     func renderIn(containerView containerView: UIView) {
         containerView.subviews.forEach { $0.removeFromSuperview() }
-        containerView.addSubview(self)
-        
-        self.topAnchor.constraintEqualToAnchor(containerView.topAnchor).active = true
-        self.bottomAnchor.constraintEqualToAnchor(containerView.bottomAnchor).active = true
-        self.leadingAnchor.constraintEqualToAnchor(containerView.leadingAnchor).active = true
-        self.trailingAnchor.constraintEqualToAnchor(containerView.trailingAnchor).active = true
+        loadInto(containerView)
     }
     
 }
 
-protocol LoadableView {
+protocol LoadableView: View {
     
     static func loadFromNib() -> Self?
     
@@ -197,30 +183,115 @@ extension RecyclerView: View {
     
 }
 
-//
-// TODO
-//
-// Think about how things like alerts should be handled. Probably the best thing
-// would be to have an AlertView which conforms to Alert and make the controller 
-// intercept it and present an alert view controller
-//
-// Things like transitions, push a controller to the navigation stack should be
-// handled by the parent components and the child components should send an 
-// OutputMessage. Is the resposability of the parent to know which controller to present
-// next. Container controller should not have a componenet associated with them. They
-// should only compose component controllers and coordinate transitions. Pretty much
-// like a coordinator.
-//
-public class BaseComponentController<StateType, EventType, DispatcherType: Dispatcher
-    where DispatcherType.EventType == EventType>: UIViewController {
+struct AlertAction {
+    
+    let title: String
+    let action: () -> ()
+    
+}
 
-    public let dispatcher: DispatcherType
+struct AlertView: View {
     
-    private let _state: AnyProperty<StateType>
+    let title: String
+    let message: String
+    let primaryAction: AlertAction
+    let secondaryAction: AlertAction
     
-    init(state: AnyProperty<StateType>, dispatcher: DispatcherType) {
-        _state = state
-        self.dispatcher = dispatcher
+}
+
+extension AlertView: Presentable {
+    
+    func presentIn(container containerController: UIViewController) {
+        let alertController = UIAlertController(
+            title: title,
+            message: message,
+            preferredStyle: .Alert
+        )
+        let primary = UIAlertAction(
+            title: primaryAction.title,
+            style: .Default,
+            handler: { _ in self.primaryAction.action() }
+        )
+        let secondary = UIAlertAction(
+            title: secondaryAction.title,
+            style: .Cancel,
+            handler: { _ in self.secondaryAction.action() }
+        )
+        alertController.addAction(primary)
+        alertController.addAction(secondary)
+        
+        containerController.presentViewController(alertController, animated: true, completion: nil)
+    }
+    
+}
+
+public enum ViewPositioning {
+    case Back
+    case Front
+}
+
+extension UIView {
+    
+    /**
+     Loads the view into the specified containerView.
+     
+     - warning: It must be done after self's view is loaded.
+     - note: It uses constraints to determine the size, so the frame isn't needed. Because of this, `loadInto()` can be used in viewDidLoad().
+     - parameter containerView: The container view.
+     - parameter viewPositioning: Back or Front. Default: Front
+     */
+    public func loadInto(containerView: UIView, viewPositioning: ViewPositioning = .Front) {
+        containerView.addSubview(self)
+        
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        translatesAutoresizingMaskIntoConstraints = false
+        
+        containerView.topAnchor.constraintEqualToAnchor(topAnchor).active = true
+        containerView.bottomAnchor.constraintEqualToAnchor(bottomAnchor).active = true
+        containerView.leadingAnchor.constraintEqualToAnchor(leadingAnchor).active = true
+        containerView.trailingAnchor.constraintEqualToAnchor(trailingAnchor).active = true
+        
+        if case viewPositioning = ViewPositioning.Back {
+            containerView.sendSubviewToBack(self)
+        }
+    }
+    
+}
+
+extension UIViewController {
+    
+    /**
+     Loads the childViewController into the specified containerView.
+     
+     It can be done after self's view is initialized, as it uses constraints to determine the childViewController size.
+     Take into account that self will retain the childViewController, so if for any other reason the childViewController is retained in another place, this would
+     lead to a memory leak. In that case, one should call unloadViewController().
+     
+     - parameter childViewController: The controller to load.
+     - parameter into: The containerView into which the controller will be loaded.
+     - parameter viewPositioning: Back or Front. Default: Front
+     */
+    public func load(childViewController childViewController: UIViewController, into containerView: UIView, viewPositioning: ViewPositioning = .Front) {
+        childViewController.willMoveToParentViewController(self)
+        addChildViewController(childViewController)
+        childViewController.didMoveToParentViewController(self)
+        childViewController.view.loadInto(containerView, viewPositioning: viewPositioning)
+    }
+    
+}
+
+public class ComponentController<StateType, InputMessageType, OutputMessageType, CommandType, CommandExecutorType: CommandExecutor
+    where   CommandExecutorType.InputMessageType == InputMessageType,
+            CommandExecutorType.CommandType == CommandType>: UIViewController, Dispatcher {
+
+    typealias ComponentType = Component<StateType, InputMessageType, OutputMessageType, CommandType, CommandExecutorType>
+    
+    public var messages: Signal<OutputMessageType, NoError> { return _component.messages }
+    
+    private let _component: ComponentType
+    
+    init(component: ComponentType) {
+        _component = component
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -229,34 +300,38 @@ public class BaseComponentController<StateType, EventType, DispatcherType: Dispa
     }
     
     override public func viewDidLoad() {
-        _state.producer
+        // TODO maybe we could add some logic here to filter states that don't need to
+        // be rendered. To do this we need views to have an associated state and those
+        // states should be comparables.
+        //
+        // For that to be implemetned view should have a comparable model associated with them.
+        // And in orther to be performant models should be reference values and the default comparison
+        // should be by reference.
+        _component.state.producer
             .map { [unowned self] in self.render($0) }
             .observeOn(UIScheduler())
-            .startWithNext { [unowned self] in
-                $0.renderIn(containerView: self.view)
+            .startWithNext { [unowned self] view in
+                switch view {
+                    
+                case let renderable as Renderable:
+                    renderable.renderIn(containerView: self.view)
+                
+                case let presentable as Presentable:
+                    presentable.presentIn(container: self)
+                
+                default:
+                    break
+                
+                }
             }
+    }
+    
+    public final func dispatch(message: InputMessageType) {
+        _component.dispatch(message)
     }
     
     func render(state: StateType) -> View {
         return UIView()
-    }
-    
-}
-
-final class ComponentController<StateType, EventType, DispatcherType: Dispatcher
-    where DispatcherType.EventType == EventType>: BaseComponentController<StateType, EventType, DispatcherType> {
-
-    typealias Renderer = (DispatcherType, StateType) -> View
-    
-    private let _renderer: Renderer
-    
-    init(state: AnyProperty<StateType>, dispatcher: DispatcherType, renderer: Renderer) {
-        _renderer = renderer
-        super.init(state: state, dispatcher: dispatcher)
-    }
-    
-    override func render(state: StateType) -> View {
-        return _renderer(dispatcher, state)
     }
     
 }
