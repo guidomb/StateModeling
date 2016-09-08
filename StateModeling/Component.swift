@@ -45,6 +45,9 @@ public enum InputMessage {
 public enum OutputMessage {
     
     case InstallCompleted(firmwareVersion: SemanticVersion)
+    case FailedToCheckForUpdate(tracker: TrackerMetadata, error: NSError)
+    case FailedToDownload(firmware: FirmwareMetadata, error: NSError)
+    case FailedToInstall(firmware: FirmwareArchive, error: NSError)
     
 }
 
@@ -58,6 +61,7 @@ public enum Command {
 
 final class FirmwareUpdateController: ComponentController<State, InputMessage, OutputMessage, Command, FirmwareUpdateCommandExecutor> {
     
+    
     init(tracker: TrackerMetadata) {
         let commandExecutor = FirmwareUpdateCommandExecutor(
             firmwareService: MockFirmwareService(),
@@ -68,53 +72,65 @@ final class FirmwareUpdateController: ComponentController<State, InputMessage, O
         super.init(component: component)
     }
     
-    override func render(state: State) -> View {
+    override func render(state state: State) -> View {
         
         switch state {
             
         case .Idle(_):
             return IdleView { [unowned self] in self.dispatch(.CheckForUpdate) }
             
-        case .CheckForUpdateError(_, _):
-            let primary = AlertAction(title: "Retry") { [unowned self] in self.dispatch(.CheckForUpdate) }
-            let secondary = AlertAction(title: "OK", action: {})
-            return AlertView(
-                title: "Error",
-                message: "There was an error checking for update.",
-                primaryAction: primary,
-                secondaryAction: secondary
-            )
-            
         case .Downloading(_, let progress):
             return RecyclerView(viewClass: ProgressView.self) {
                 $0.model = ProgressView.Model(unit: .KiloBytes, progress: progress)
             }
-            
-        case .DownloadError(let firmware, _):
-            let primary = AlertAction(title: "Retry") { [unowned self] in self.dispatch(.Download) }
-            let secondary = AlertAction(title: "OK", action: {})
-            return AlertView(
-                title: "Error",
-                message: "There was an error downloading firmware version \(firmware.version).",
-                primaryAction: primary,
-                secondaryAction: secondary
-            )
-            
-        case .InstallError(let firmware, _):
-            let primary = AlertAction(title: "Retry") { [unowned self] in self.dispatch(.Install) }
-            let secondary = AlertAction(title: "OK", action: {})
-            return AlertView(
-                title: "Error",
-                message: "There was an error installing firmware version \(firmware.metadata.version).",
-                primaryAction: primary,
-                secondaryAction: secondary
-            )
             
         default:
             // TODO handle all possible states
             return UIView()
             
         }
+    }
+    
+    override func process(message message: OutputMessage) {
+        switch message {
+        
+        case .FailedToCheckForUpdate(_, _):
+            presentErrorAlert(.CheckForUpdate)
+            
+        case .FailedToDownload(_, _):
+            presentErrorAlert(.Download)
+            
+        case .FailedToInstall(_, _):
+            presentErrorAlert(.Install)
+        
+        default:
+            break
+        }
+    }
+    
+}
+
+private extension FirmwareUpdateController {
+    
+    enum ErrorAlert: String {
+        
+        case CheckForUpdate = "firmware-update.check-for-update-error-alert"
+        case Download = "firmware-update.download-error-alert"
+        case Install = "firmware-update.install-error-alert"
+        
+        var primaryMessage: InputMessage {
+            switch self {
+            case .CheckForUpdate: return .CheckForUpdate
+            case .Download: return .Download
+            case .Install: return .Install
+            }
+        }
+        
+    }
+    
+    private func presentErrorAlert(errorAlert: ErrorAlert) {
+        let alert = createDoubleActionAlert(errorAlert.rawValue, primary: errorAlert.primaryMessage)
+        present(alert)
     }
     
 }
@@ -128,7 +144,7 @@ public func behavior(state: State, message: InputMessage) -> (State, Command?, O
         return (.CheckingForUpdate(tracker: tracker), .CheckForUpdate(tracker: tracker), .None)
         
     case (.CheckingForUpdate(let tracker), .FailedToCheckForUpdate(let error)):
-        return (.CheckForUpdateError(tracker: tracker, error: error), .None, .None)
+        return (.CheckForUpdateError(tracker: tracker, error: error), .None, .FailedToCheckForUpdate(tracker: tracker, error: error))
         
     case (.CheckForUpdateError(let tracker, _), .CheckForUpdate):
         return (.CheckingForUpdate(tracker: tracker), .CheckForUpdate(tracker: tracker), .None)
@@ -147,7 +163,7 @@ public func behavior(state: State, message: InputMessage) -> (State, Command?, O
         return (.Downloading(firmware: firmware, progress: progress), .None, .None)
         
     case (.Downloading(let firmware, _), .FailedToDownload(let error)):
-        return (.DownloadError(firmware: firmware, error: error), .None, .None)
+        return (.DownloadError(firmware: firmware, error: error), .None, .FailedToDownload(firmware: firmware, error: error))
         
     case (.DownloadError(let firmware, _), .Download):
         let progress = Progress(partial: 0, total: firmware.size)
@@ -165,7 +181,7 @@ public func behavior(state: State, message: InputMessage) -> (State, Command?, O
         return (.Installing(firmware: firmware, progress: progress), .None, .None)
         
     case (.Installing(let firmware, _), .FailedToInstall(let error)):
-        return (.InstallError(firmware: firmware, error: error), .None, .None)
+        return (.InstallError(firmware: firmware, error: error), .None, .FailedToInstall(firmware: firmware, error: error))
         
     case (.InstallError(let firmware, _), .Install):
         let progress = Progress(partial: 0, total: firmware.metadata.size)
